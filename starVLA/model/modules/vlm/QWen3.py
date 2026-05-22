@@ -50,6 +50,8 @@ class _QWen3_VL_Interface(nn.Module):
         model_id = qwenvl_config.get("base_vlm", "Qwen/Qwen3-VL-4B-Instruct")
         attn_implementation = qwenvl_config.get("attn_implementation", "sdpa")
         attn_implementation = "sdpa"
+        on_4090_debug = qwenvl_config.get("on_4090_debug", False)
+
         # Fallback to sdpa if flash_attention_2 is requested but flash_attn is not installed
         if attn_implementation == "flash_attention_2":
             try:
@@ -58,11 +60,23 @@ class _QWen3_VL_Interface(nn.Module):
                 print("[WARNING] flash_attn not installed, falling back to sdpa")
                 attn_implementation = "sdpa"
 
+        if on_4090_debug:
+            from transformers import AutoConfig
+            _hf_cfg = AutoConfig.from_pretrained(model_id)
+            _hf_cfg.text_config.num_hidden_layers = 1
+            if hasattr(_hf_cfg, "vision_config") and hasattr(_hf_cfg.vision_config, "depth"):
+                _hf_cfg.vision_config.depth = 1
+            logger.warning(f"[on_4090_debug] Truncated {model_id} to 1 text layer + 1 vision layer")
+            _extra = {"config": _hf_cfg}
+        else:
+            _extra = {}
+
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_id,
             attn_implementation=attn_implementation,
             dtype=torch.bfloat16,
             ignore_mismatched_sizes=True, # resize image no longer needed? @TODO check bug
+            **_extra,
         )
         processor = AutoProcessor.from_pretrained(model_id)
         processor.tokenizer.padding_side = "left"
